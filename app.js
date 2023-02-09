@@ -3,7 +3,7 @@ const express = require('express'),
   fs = require('fs'),
   bodyParser = require('body-parser'),
   multiparty = require('multiparty'),
-  sparkMD5 = require('spark-md5');
+  SparkMD5 = require('spark-md5');
 
 // 创建服务器
 
@@ -39,10 +39,42 @@ const delay = (interval) => {
 };
 
 // 检测文件是否存在
-const exist = () => {};
+const exist = path => {
+  return new Promise(resolve => {
+    fs.access(path, fs.constants.F_OK, err => {
+      if (err) {
+        resolve(false);
+      }
+      resolve(true);
+    });
+  });
+};
 
 // 创建文件并写入到指定目录 & 返回客户端结果
-const writeFile = () => {};
+const writeFile = (res, path, file, fileName, stream) => {
+  return new Promise((resolve, reject) => {
+    // 流式写入
+    if (stream) {}
+    fs.writeFile(path, file, err => {
+      if (err) {
+        reject(err);
+        res.send({
+          code: 1,
+          codeText: err
+        });
+        return;
+      }
+      resolve();
+      console.log(`文件「${fileName}」上传成功！`)
+      res.send({
+        code: 0,
+        codeText: 'upload success',
+        originalFilename: fileName,
+        servicePath: path.replace(__dirname, HOSTNAME)
+      });
+    });
+  });
+};
 
 // 基于 multiparty 实现文件上传处理 & form-data 解析
 const uploadDir = `${__dirname}/data`;
@@ -70,6 +102,8 @@ app.post('/upload_single_formdata', async (req, res) => {
   try {
     let { fields, files } = await multiparty_upload(req, true);
     let file = (files.file && files.file[0]) || {};
+    // log
+    console.log(`文件「${fields.fileName[0]}」上传成功！`)
     res.send({
       code: 0,
       codeText: 'upload success',
@@ -83,3 +117,33 @@ app.post('/upload_single_formdata', async (req, res) => {
     });
   }
 });
+
+// 单文件上传处理「base64」
+app.post('/upload_single_base64', async (req, res) => {
+  let file = req.body.file,
+    fileName = req.body.fileName,
+    spark = new SparkMD5.ArrayBuffer(),
+    suffix = /\.([0-9a-zA-Z]+)$/.exec(fileName)[1],
+    isExist = false,
+    path;
+  file = decodeURIComponent(file);
+  file = file.replace(/^data:image\/\w+;base64,/, '');
+  file = Buffer.from(file, 'base64');
+  spark.append(file);
+  path = `${uploadDir}/${spark.end()}.${suffix}`;
+  // 手动延迟
+  await delay();
+  // 写入文件
+  isExist = await exist(path);
+  if (isExist) {
+    console.log(`文件「${fileName}」已存在！`)
+    res.send({
+      code: 0,
+      codeText: 'file is exist',
+      originalFilename: fileName,
+      servicePath: path.replace(__dirname, HOSTNAME)
+    });
+    return;
+  }
+  writeFile(res, path, file, fileName, false);
+})
