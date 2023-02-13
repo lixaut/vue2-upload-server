@@ -56,7 +56,22 @@ const exist = path => {
 const writeFile = (res, path, file, fileName, stream) => {
   return new Promise((resolve, reject) => {
     // 流式写入
-    if (stream) {}
+    if (stream) {
+      let ws = fs.createWriteStream(path);
+      ws.write(file);
+      ws.on('close', () => {
+        resolve();
+        console.log(`文件「${fileName}」写入成功！`);
+        res.send({
+          code: 0,
+          codeText: 'upload success',
+          originalFilename: fileName,
+          servicePath: path.replace(__dirname, HOSTNAME)
+        });
+      });
+      return;
+    }
+    // 正常写入
     fs.writeFile(path, file, err => {
       if (err) {
         reject(err);
@@ -96,6 +111,41 @@ const multiparty_upload = (req, auto) => {
         return;
       }
       resolve({fields, files});
+    });
+  });
+};
+
+// 大文件上传 & 切片合并
+const merge = (HASH, count) => {
+  return new Promise( async (resolve, reject) => {
+    let path = `${uploadDir}/${HASH}`,
+      fileList = [],
+      suffix,
+      isExist;
+    isExist = await exist(path);
+    // 合并文件夹是否存在
+    if (!isExist) {
+      reject('HASH path is not found');
+      return;
+    }
+    fileList = fs.readdirSync(path);
+    // 切片是否上传完成
+    if (fileList.length < count) {
+      reject('the slice has not been uploaded');
+      return;
+    }
+    fileList.sort((a, b) => {
+      let regExp = /_(\d+)/;
+      return regExp.exec(a)[1] - regExp.exec(b)[1];
+    }).forEach(item => {
+      !suffix ? suffix = /\.([0-9a-zA-Z]+)$/.exec(item)[1] : null;
+      fs.appendFileSync(`${uploadDir}/${HASH}.${suffix}`, fs.readFileSync(`${path}/${item}`));
+      fs.unlinkSync(`${path}/${item}`);
+    });
+    fs.rmdirSync(path);
+    resolve({
+      path: `${uploadDir}/${HASH}.${suffix}`,
+      fileName: `${HASH}.${suffix}`
     });
   });
 };
@@ -183,6 +233,86 @@ app.post('/upload_single_hash', async (req, res) => {
     res.send({
       code: 1,
       codeText: err
+    });
+  }
+});
+
+// 大文件上传 & 合并切片
+app.post('/upload_merge', async (req, res) => {
+  let { HASH, count } = req.body;
+  try {
+    let { fileName, path } = await merge(HASH, count);
+    res.send({
+      code: 0,
+      codeText: 'merge success',
+      originalFilename: fileName,
+      servicePath: path.replace(__dirname, HOSTNAME)
+    })
+  } catch (err) {
+    res.send({
+      code: 1,
+      codeText: err
+    });
+  }
+});
+
+// 大文件上传 & 切片上传
+app.post('/upload_chunk', async (req, res) => {
+  try {
+    let { fields, files } = await multiparty_upload(req),
+      file = (files.file && files.file[0]) || {},
+      fileName = (fields.fileName && fields.fileName[0]) || '',
+      path = '',
+      isExist = false;
+    // 创建存放切片的临时目录
+    let HASH = /^([^_]+)_(\d+)/.exec(fileName)[1];
+    path = `${uploadDir}/${HASH}`;
+    !fs.existsSync(path) ? fs.mkdirSync(path) : null;
+    // 把切片存储到临时目录中
+    path = `${uploadDir}/${HASH}/${fileName}`;
+    isExist = await exist(path);
+    if (isExist) {
+      res.send({
+        code: 0,
+        codeText: 'file is exists',
+        originalFilename: fileName,
+        servicePath: path.replace(__dirname, HOSTNAME)
+      });
+      return;
+    }
+    file = decodeURIComponent(file);
+    file = file.replace(/^data:image\/\w+;base64,/, '');
+    file = Buffer.from(file, 'base64');
+    writeFile(res, path, file, fileName, true);
+  } catch (err) {
+    res.send({
+      code: 1,
+      codeText: err
+    });
+  }
+});
+
+// 大文件上传 & 已上传切片
+app.get('/upload_already', async (req, res) => {
+  let { HASH } = req.query,
+    path = `${uploadDir}/${HASH}`,
+    fileList = [];
+  try {
+    fileList = fs.readdirSync(path);
+    fileList = fileList.sort((a, b) => {
+      let regExp = /_(\d+)/;
+      return regExp.exec(a)[1] - regExp.exec(b)(1);
+    });
+    res.send({
+      code: 0,
+      codeText: 'success',
+      fileList
+    });
+  } catch (err) {
+    res.send({
+      code: 0,
+      codeText: err,
+      fileList
     });
   }
 });
