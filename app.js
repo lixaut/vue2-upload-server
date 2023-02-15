@@ -59,15 +59,14 @@ const writeFile = (res, path, file, fileName, stream) => {
     if (stream) {
       let ws = fs.createWriteStream(path);
       ws.write(file);
-      ws.on('close', () => {
-        resolve();
-        console.log(`文件「${fileName}」写入成功！`);
-        res.send({
-          code: 0,
-          codeText: 'upload success',
-          originalFilename: fileName,
-          servicePath: path.replace(__dirname, HOSTNAME)
-        });
+      ws.end();
+      resolve();
+      console.log(`文件「${fileName}」写入成功！`);
+      res.send({
+        code: 0,
+        codeText: 'upload success',
+        originalFilename: fileName,
+        servicePath: path.replace(__dirname, HOSTNAME)
       });
       return;
     }
@@ -139,7 +138,8 @@ const merge = (HASH, count) => {
       return regExp.exec(a)[1] - regExp.exec(b)[1];
     }).forEach(item => {
       !suffix ? suffix = /\.([0-9a-zA-Z]+)$/.exec(item)[1] : null;
-      fs.appendFileSync(`${uploadDir}/${HASH}.${suffix}`, fs.readFileSync(`${path}/${item}`));
+      let fileBin = fs.readFileSync(`${path}/${item}`);
+      fs.appendFileSync(`${uploadDir}/${HASH}.${suffix}`, fileBin, { flag: 'as'});
       fs.unlinkSync(`${path}/${item}`);
     });
     fs.rmdirSync(path);
@@ -259,8 +259,8 @@ app.post('/upload_merge', async (req, res) => {
 // 大文件上传 & 切片上传
 app.post('/upload_chunk', async (req, res) => {
   try {
-    let { fields, files } = await multiparty_upload(req),
-      file = (files.file && files.file[0]) || {},
+    let { fields } = await multiparty_upload(req),
+      file = (fields.file && fields.file[0]) || {},
       fileName = (fields.fileName && fields.fileName[0]) || '',
       path = '',
       isExist = false;
